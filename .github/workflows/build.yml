@@ -1,0 +1,24 @@
+name: build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # 若报 "solution configuration is invalid"，把 Platform=x64 换成 Win32
+      - name: Build
+        run: msbuild ScrollSound.sln /m /p:Configuration=Release /p:Platform=x64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScrollSound
+          path: "**/*.exe"
