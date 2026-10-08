@@ -61,6 +61,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	//开始Hook
 	SetMouseHook(0);
 
+	//监视 setting.ini：双击判定参数改了就地生效，不需要重启或重新 hook
+	StartDoubleClickConfigWatch();
+
 	//设置定时器，一分钟执行一次hook，执行10次。
 	//目的是为让MousHOOK保持在HOOK链的链头，以避免和其他软件冲突。
 	UINT_PTR timerId = SetTimer(NULL, 0, 1000*60, TimerProc); // 非阻塞定时器
@@ -164,6 +167,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		{
 			GetCursorPos(&pt);//取鼠标坐标
 			::SetForegroundWindow(hWnd);//解决在菜单外单击左键菜单不消失的问题
+			UpdateDoubleClickTimeMenu();//弹出前刷新，保证档位勾选和标题都是最新的
 			menuItemId = ::TrackPopupMenu(subMenu, TPM_RETURNCMD |TPM_BOTTOMALIGN | TPM_LEFTALIGN, pt.x, pt.y, NULL, hWnd, NULL);//显示菜单并获取选项ID
 			TrayMenuMessage(menuItemId);
 			if (menuItemId == 0) PostMessage(hWnd, WM_LBUTTONDOWN, NULL, NULL);
@@ -176,6 +180,61 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
+
+//托盘菜单里的双击判定时间档位：0 表示跟随系统设置
+struct DoubleClickTimePreset { UINT id; int ms; };
+static const DoubleClickTimePreset kDoubleClickTimePresets[] = {
+	{ ID_DBLCLICK_TIME_150,    150 },
+	{ ID_DBLCLICK_TIME_200,    200 },
+	{ ID_DBLCLICK_TIME_250,    250 },
+	{ ID_DBLCLICK_TIME_300,    300 },
+	{ ID_DBLCLICK_TIME_400,    400 },
+	{ ID_DBLCLICK_TIME_500,    500 },
+	{ ID_DBLCLICK_TIME_SYSTEM, 0   },
+};
+static const int kDoubleClickTimePresetCount = _countof(kDoubleClickTimePresets);
+
+//刷新“双击判定时间”子菜单：标题里带上当前生效值，档位里勾选匹配项。
+//setting.ini 里手写的非档位值不会勾中任何档位，但标题仍能看到实际生效的毫秒数
+static void UpdateDoubleClickTimeMenu()
+{
+	int cfgMs = GetDoubleClickIntervalSetting();
+	int effectiveMs = (cfgMs > 0) ? cfgMs : static_cast<int>(GetDoubleClickTime());
+
+	TCHAR title[64] = { 0 };
+	_stprintf_s(title, _T("双击判定时间(%dms)(&D)"), effectiveMs);
+
+	//子菜单来自资源菜单，这里按 ID 取到句柄再改标题
+	MENUITEMINFO mii = { 0 };
+	mii.cbSize = sizeof(mii);
+	mii.fMask = MIIM_SUBMENU;
+	if (GetMenuItemInfo(subMenu, ID_DBLCLICK_TIME_MENU, FALSE, &mii) && mii.hSubMenu) {
+		ModifyMenu(subMenu, ID_DBLCLICK_TIME_MENU, MF_BYCOMMAND | MF_POPUP | MF_STRING,
+			reinterpret_cast<UINT_PTR>(mii.hSubMenu), title);
+	}
+
+	UINT checkId = ID_DBLCLICK_TIME_SYSTEM;
+	bool matched = false;
+	for (int i = 0; i < kDoubleClickTimePresetCount; i++) {
+		if (cfgMs > 0 && kDoubleClickTimePresets[i].ms == cfgMs) {
+			checkId = kDoubleClickTimePresets[i].id;
+			matched = true;
+			break;
+		}
+	}
+
+	if (matched) {
+		//档位 ID 连续且升序，可以直接按范围勾选
+		CheckMenuRadioItem(subMenu, kDoubleClickTimePresets[0].id,
+			kDoubleClickTimePresets[kDoubleClickTimePresetCount - 1].id, checkId, MF_BYCOMMAND);
+	}
+	else {
+		//非档位值：全部取消勾选，免得看起来像“跟随系统设置”
+		for (int i = 0; i < kDoubleClickTimePresetCount; i++) {
+			CheckMenuItem(subMenu, kDoubleClickTimePresets[i].id, MF_BYCOMMAND | MF_UNCHECKED);
+		}
+	}
+}
 
 // 初始化托盘和菜单
 void InitTray(HINSTANCE hInstance, HWND hWnd)
@@ -198,6 +257,7 @@ void InitTray(HINSTANCE hInstance, HWND hWnd)
 
 	CheckMenuItem(subMenu, ID_AUTO_RUNNING, (aR.IsAutoRunning() ? MF_CHECKED : MF_UNCHECKED));
 	CheckMenuItem(subMenu, ID_ADMIN, (IsSettingAdmin() ? MF_CHECKED : MF_UNCHECKED));
+	UpdateDoubleClickTimeMenu();
 	Shell_NotifyIcon(NIM_ADD, &nid);
 }
 
@@ -263,6 +323,17 @@ void TrayMenuMessage(int MessageID) {
 			//cout << "SetMouseHook" << endl;
 			ModifyMenu(subMenu, ID_PAUSE, MF_BYCOMMAND | MF_STRING, ID_PAUSE, _T("暂停"));
 			isPause = TRUE;
+		}
+		break;
+
+	default:
+		//双击判定时间档位：写回 setting.ini 并立即生效，同时刷新勾选
+		for (int i = 0; i < kDoubleClickTimePresetCount; i++) {
+			if (MessageID == static_cast<int>(kDoubleClickTimePresets[i].id)) {
+				SetDoubleClickIntervalSetting(kDoubleClickTimePresets[i].ms);
+				UpdateDoubleClickTimeMenu();
+				break;
+			}
 		}
 		break;
 	}

@@ -10,6 +10,7 @@
 #include <windows.h>
 // C 运行时头文件
 #include <stdlib.h>
+#include <stdio.h>
 #include <malloc.h>
 #include <memory.h>
 #include <tchar.h>
@@ -33,6 +34,23 @@ using namespace std;
 #define KEY_DBLCLICK_ENABLE L"DoubleClickEnabled"
 #define KEY_DBLCLICK_CMD    L"DoubleClickCommand"
 #define KEY_DBLCLICK_ARGS   L"DoubleClickArgs"
+
+//双击判定参数：两次点击允许的最大间隔（毫秒）和最大偏移（像素）。
+//配 0 表示跟随系统设置（GetDoubleClickTime / SM_CXDOUBLECLK），配其它值可收紧判定，减少误触发。
+#define KEY_DBLCLICK_INTERVAL L"DoubleClickInterval"
+#define KEY_DBLCLICK_RECT     L"DoubleClickRect"
+
+//判定参数允许的范围，手写越界的值会被夹到边界，避免配置写错导致双击功能失效
+#define DBLCLICK_INTERVAL_MIN 50
+#define DBLCLICK_INTERVAL_MAX 2000
+#define DBLCLICK_RECT_MIN     1
+#define DBLCLICK_RECT_MAX     50
+
+//DoubleClickInterval 的缺省值：比系统默认的 500ms 更严格，判定不至于太宽泛
+#define DBLCLICK_INTERVAL_DEFAULT 300
+
+//配置监视定时器的间隔（毫秒）：setting.ini 被改动后最迟这么久生效
+#define DBLCLICK_CONFIG_WATCH_MS 1000
 
 //setting.ini 的绝对路径（exe 同目录），首次调用时计算并缓存。
 //不能再用 ".\setting.ini"：开机自启时进程的当前目录未必是 exe 所在目录，那样会读不到配置。

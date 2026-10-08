@@ -45,6 +45,8 @@ Administrator=0
 DoubleClickEnabled=1
 DoubleClickCommand=taskmgr.exe
 DoubleClickArgs=
+DoubleClickInterval=300
+DoubleClickRect=0
 ```
 
 | 配置项 | 说明 |
@@ -52,6 +54,8 @@ DoubleClickArgs=
 | `DoubleClickEnabled` | `1` 启用双击动作，`0` 关闭 |
 | `DoubleClickCommand` | 要打开的程序、文件或协议，支持中文路径；**留空**则不执行任何动作 |
 | `DoubleClickArgs` | 传给该程序的命令行参数，可留空 |
+| `DoubleClickInterval` | 双击判定时间（毫秒）：两次左键按下的间隔不超过它才算双击。默认 `300`（比系统的 500ms 更严格，判定不至于太宽泛）；配 `0` 跟随系统双击时间。可填 50~2000 |
+| `DoubleClickRect` | 双击判定的位置容差（像素，横向/纵向各自的最大偏移）。配 `0`（默认）跟随系统双击矩形；判定太宽泛时可填 1~50 收紧 |
 
 常用写法：
 
@@ -63,7 +67,9 @@ DoubleClickArgs=
 | 截图工具 | `ms-screenclip:` |
 | 任意程序 | `D:\工具\Everything.exe`（中文路径也可以） |
 
-改完配置后，在托盘菜单点一下 **重新HOOK** 即可生效，不用重启程序。
+**配置是热更新的**：程序每秒检查一次 `setting.ini`，改完保存后 1 秒内自动生效，不用重启，也不用重新 HOOK。
+
+托盘菜单里的 **双击判定时间** 子菜单还能直接切换常用档位（150 / 200 / 250 / 300 / 400 / 500 毫秒或跟随系统设置），选中后会写回 `setting.ini` 并立即生效；菜单标题里显示的就是当前实际生效的毫秒数。若在 `setting.ini` 里手填了非档位的值（如 `350`），菜单不会勾选任何档位，但标题仍会显示实际值。
 
 注意事项：
 

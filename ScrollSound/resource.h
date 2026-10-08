@@ -1,4 +1,4 @@
-﻿//{{NO_DEPENDENCIES}}
+//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ 生成的包含文件。
 // 供 ScrollSound.rc 使用
 //
@@ -16,6 +16,14 @@
 #define ID_Menu                         32783
 #define ID_REHOOK                       32784
 #define ID_PAUSE                        32786
+#define ID_DBLCLICK_TIME_MENU           32788
+#define ID_DBLCLICK_TIME_150            32789
+#define ID_DBLCLICK_TIME_200            32790
+#define ID_DBLCLICK_TIME_250            32791
+#define ID_DBLCLICK_TIME_300            32792
+#define ID_DBLCLICK_TIME_400            32793
+#define ID_DBLCLICK_TIME_500            32794
+#define ID_DBLCLICK_TIME_SYSTEM         32795
 #define ID_APP_EXIT                     0xE141
 #define IDC_STATIC                      -1
 
@@ -25,7 +33,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        163
-#define _APS_NEXT_COMMAND_VALUE         32788
+#define _APS_NEXT_COMMAND_VALUE         32796
 #define _APS_NEXT_CONTROL_VALUE         1000
 #define _APS_NEXT_SYMED_VALUE           110
 #endif

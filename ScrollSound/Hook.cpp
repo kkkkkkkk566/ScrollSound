@@ -27,6 +27,19 @@ static bool g_dblEnabled = true;
 static TCHAR g_dblCmd[MAX_PATH] = { 0 };
 static TCHAR g_dblArgs[MAX_PATH] = { 0 };
 
+//双击判定参数（来自 setting.ini）：0 表示跟随系统设置
+static int g_dblIntervalCfg = 0;			//两次点击允许的最大间隔，单位毫秒
+static int g_dblRectCfg = 0;				//两次点击允许的最大偏移，单位像素
+
+//真正生效的判定参数：读配置时一次算好，鼠标钩子回调里只做比较，
+//避免在钩子里多做 GetDoubleClickTime / GetSystemMetrics 这类系统调用
+static int g_dblIntervalMs = 500;
+static int g_dblRectX = 2;
+static int g_dblRectY = 2;
+
+//上次读取配置时 setting.ini 的修改时间，用来实现配置热更新
+static FILETIME g_iniWriteTime = { 0, 0 };
+
 //双击判定状态：记录上一次左键按下的时间和位置
 static bool g_hasLastClick = false;			//是否已有待配对的首击（不用时间戳是否为 0 判断，避免计时器回绕边界）
 static DWORD g_lastClickTick = 0;
@@ -119,6 +132,25 @@ static bool IniKeyExists(LPCTSTR key)
 	return probe[0] != _T('\x01');
 }
 
+//读取 ini 里的整数判定参数：
+//键不存在时写入默认值；配 0 或负数表示跟随系统设置；其余值夹到 [minVal, maxVal]，
+//避免手写的越界值让判定变得过宽（比如 100000 毫秒）或者直接失效（比如 0 被当成不判定）
+static int ReadIniIntClamped(LPCTSTR key, int defaultValue, int minVal, int maxVal)
+{
+	if (!IniKeyExists(key)) {
+		TCHAR def[16] = { 0 };
+		_stprintf_s(def, _T("%d"), defaultValue);
+		WritePrivateProfileString(SECTION_NAME, key, def, SETTING_PATH);
+		return defaultValue;
+	}
+
+	int value = GetPrivateProfileInt(SECTION_NAME, key, defaultValue, SETTING_PATH);
+	if (value <= 0) return 0;				//0 表示跟随系统设置
+	if (value < minVal) return minVal;
+	if (value > maxVal) return maxVal;
+	return value;
+}
+
 //读取 setting.ini 里的双击动作配置；缺少的配置项写入默认值（默认动作是任务管理器）
 static void LoadDoubleClickSetting()
 {
@@ -133,6 +165,81 @@ static void LoadDoubleClickSetting()
 	GetPrivateProfileString(SECTION_NAME, KEY_DBLCLICK_CMD, _T(""), g_dblCmd, MAX_PATH, SETTING_PATH);
 	GetPrivateProfileString(SECTION_NAME, KEY_DBLCLICK_ARGS, _T(""), g_dblArgs, MAX_PATH, SETTING_PATH);
 	g_dblEnabled = GetPrivateProfileInt(SECTION_NAME, KEY_DBLCLICK_ENABLE, 1, SETTING_PATH) != 0;
+
+	//判定参数：默认 300ms（比系统的 500ms 严格），判定距离默认跟随系统
+	g_dblIntervalCfg = ReadIniIntClamped(KEY_DBLCLICK_INTERVAL, DBLCLICK_INTERVAL_DEFAULT,
+		DBLCLICK_INTERVAL_MIN, DBLCLICK_INTERVAL_MAX);
+	g_dblRectCfg = ReadIniIntClamped(KEY_DBLCLICK_RECT, 0, DBLCLICK_RECT_MIN, DBLCLICK_RECT_MAX);
+
+	//算出真正生效的值：配置为 0 时取系统设置；X/Y 分别取，避免系统宽高不等时判定失真
+	g_dblIntervalMs = (g_dblIntervalCfg > 0) ? g_dblIntervalCfg : static_cast<int>(GetDoubleClickTime());
+	g_dblRectX = (g_dblRectCfg > 0) ? g_dblRectCfg : GetSystemMetrics(SM_CXDOUBLECLK) / 2;
+	g_dblRectY = (g_dblRectCfg > 0) ? g_dblRectCfg : GetSystemMetrics(SM_CYDOUBLECLK) / 2;
+}
+
+//取 setting.ini 的最后修改时间，用来判断配置有没有被改过
+static bool GetSettingWriteTime(FILETIME* ft)
+{
+	WIN32_FILE_ATTRIBUTE_DATA fad;
+	if (!GetFileAttributesEx(SETTING_PATH, GetFileExInfoStandard, &fad)) return false;
+	*ft = fad.ftLastWriteTime;
+	return true;
+}
+
+//立即重读配置并生效：改完 setting.ini 不用重启，也不用重新 hook
+void ReloadDoubleClickSetting()
+{
+	//profile API 会缓存 ini 内容，外部编辑器改过的值可能读不到；
+	//按 MSDN 的做法用一次空写入把缓存刷掉，保证读到磁盘上的最新内容
+	WritePrivateProfileString(NULL, NULL, NULL, SETTING_PATH);
+
+	LoadDoubleClickSetting();
+
+	//LoadDoubleClickSetting 在缺键时会补写默认值，这里必须重新取一次文件时间，
+	//否则记录值永远落后于文件，监视定时器会每秒重读一次
+	GetSettingWriteTime(&g_iniWriteTime);
+}
+
+//配置监视定时器：每秒看一眼 setting.ini 有没有被改动，改了就地重读，实现热更新。
+//运行在主线程的消息泵里，和鼠标钩子回调同线程，因此判定参数不需要额外同步
+static void CALLBACK DoubleClickConfigWatchProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
+{
+	FILETIME ft;
+	if (!GetSettingWriteTime(&ft)) return;
+
+	if (ft.dwLowDateTime == g_iniWriteTime.dwLowDateTime
+		&& ft.dwHighDateTime == g_iniWriteTime.dwHighDateTime) return;
+
+	ReloadDoubleClickSetting();
+}
+
+//启动配置监视定时器（程序启动时调用一次即可）
+void StartDoubleClickConfigWatch()
+{
+	static UINT_PTR watchTimer = 0;
+	if (watchTimer) return;
+
+	//先记下当前文件时间做基线，避免启动时立刻触发一次无意义的重读
+	if (g_iniWriteTime.dwLowDateTime == 0 && g_iniWriteTime.dwHighDateTime == 0)
+		GetSettingWriteTime(&g_iniWriteTime);
+
+	watchTimer = SetTimer(NULL, 0, DBLCLICK_CONFIG_WATCH_MS, DoubleClickConfigWatchProc);
+}
+
+//给托盘菜单用：返回 ini 里配的判定时间（毫秒），0 表示跟随系统
+int GetDoubleClickIntervalSetting()
+{
+	return g_dblIntervalCfg;
+}
+
+//给托盘菜单用：写入判定时间并立即生效（0 表示跟随系统）
+void SetDoubleClickIntervalSetting(int ms)
+{
+	TCHAR text[16] = { 0 };
+	_stprintf_s(text, _T("%d"), (ms > 0 ? ms : 0));
+	WritePrivateProfileString(SECTION_NAME, KEY_DBLCLICK_INTERVAL, text, SETTING_PATH);
+
+	ReloadDoubleClickSetting();
 }
 
 //初始化 UIAutomation，重复调用无副作用
@@ -271,16 +378,16 @@ LRESULT CALLBACK MouseProc(
 	case WM_LBUTTONDOWN:
 	{
 		//双击任务栏空白处：不能依赖 WM_LBUTTONDBLCLK（任务栏窗口类不一定带 CS_DBLCLKS 样式），
-		//这里用系统双击时间和双击矩形自己判定。
+		//这里用双击判定参数自己判定：间隔和偏移都来自 setting.ini，可热更新，配 0 则跟随系统设置。
 		//钩子里只做取坐标和比较这类最轻量的操作，是否在任务栏、是不是空白处都交给主消息循环，
 		//避免在钩子回调里做 WindowFromPoint / UIA 查询导致超时被系统摘掉钩子。
 		GetCursorPos(&p);
 
 		DWORD now = GetTickCount();
 		bool isDoubleClick = g_hasLastClick
-			&& (now - g_lastClickTick <= GetDoubleClickTime())
-			&& (abs(static_cast<int>(p.x - g_lastClickPos.x)) <= GetSystemMetrics(SM_CXDOUBLECLK) / 2)
-			&& (abs(static_cast<int>(p.y - g_lastClickPos.y)) <= GetSystemMetrics(SM_CYDOUBLECLK) / 2);
+			&& (now - g_lastClickTick <= static_cast<DWORD>(g_dblIntervalMs))
+			&& (abs(static_cast<int>(p.x - g_lastClickPos.x)) <= g_dblRectX)
+			&& (abs(static_cast<int>(p.y - g_lastClickPos.y)) <= g_dblRectY);
 
 		POINT firstPos = g_lastClickPos;
 		g_hasLastClick = true;
@@ -321,7 +428,7 @@ LRESULT CALLBACK MouseProc(
 void SetMouseHook(DWORD threadId)
 {
 	InitUIAutomation();
-	LoadDoubleClickSetting();				//重新 hook 时顺带重新读取配置
+	ReloadDoubleClickSetting();				//重新 hook 时顺带重新读取配置（含判定参数）
 
 	if (cwvh.IsWindows10()) {
 		_tcscpy_s(taskBarClassName, _T("MSTaskListWClass"));
