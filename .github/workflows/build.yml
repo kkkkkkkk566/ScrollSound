@@ -2,11 +2,19 @@ name: build
 
 on:
   push:
+    # 只在主分支和版本 tag 上构建，避免删 tag、推临时分支这类事件空跑一次 CI
+    branches:
+      - master
+    tags:
+      - 'V*'
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
+    # 打 tag 时要创建 Release，GITHUB_TOKEN 默认只读，必须显式申请写权限
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -22,3 +30,11 @@ jobs:
         with:
           name: ScrollSound
           path: "**/*.exe"
+
+      # 只有推 V* tag 才发 Release；master 上的普通构建会跳过这一步
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "**/*.exe"
+          generate_release_notes: true
