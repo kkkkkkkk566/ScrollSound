@@ -27,9 +27,50 @@
 
 ## ✨使用
 
-双击打开，将鼠标移至任务栏空白处，滚动滚轮或按下滚轮即可调节音量大小或静音。
+双击打开，将鼠标移至任务栏空白处：
+
+- 滚动滚轮：调节音量大小
+- 按下滚轮（中键）：静音 / 取消静音
+- 双击左键：打开 `setting.ini` 里配置的程序，默认是任务管理器
 
 为什么要用？为了优雅。
+
+## ⚙️双击动作配置
+
+程序会在 exe 同目录下生成 `setting.ini`（UTF-16 LE 编码），双击动作由它决定：
+
+```ini
+[setting]
+Administrator=0
+DoubleClickEnabled=1
+DoubleClickCommand=taskmgr.exe
+DoubleClickArgs=
+```
+
+| 配置项 | 说明 |
+| --- | --- |
+| `DoubleClickEnabled` | `1` 启用双击动作，`0` 关闭 |
+| `DoubleClickCommand` | 要打开的程序、文件或协议，支持中文路径；**留空**则不执行任何动作 |
+| `DoubleClickArgs` | 传给该程序的命令行参数，可留空 |
+
+常用写法：
+
+| 想双击打开 | `DoubleClickCommand=` |
+| --- | --- |
+| 任务管理器 | `taskmgr.exe` |
+| 资源监视器 | `resmon.exe` |
+| 声音设置（音量合成器） | `ms-settings:appsvolume` |
+| 截图工具 | `ms-screenclip:` |
+| 任意程序 | `D:\工具\Everything.exe`（中文路径也可以） |
+
+改完配置后，在托盘菜单点一下 **重新HOOK** 即可生效，不用重启程序。
+
+注意事项：
+
+- `setting.ini` 请保持 **UTF-16 LE** 编码。用记事本直接编辑保存即可（记事本会沿用原编码）；若被另存为「UTF-8 带 BOM」，程序下次启动会自动转回 UTF-16 LE；但「UTF-8 无 BOM」无法自动识别，此时中文路径可能乱码。
+- 双击动作只对**任务栏空白处**生效，双击任务栏上的应用图标、托盘图标不会有任何动作。
+- 程序启动子进程时的工作目录是 ScrollSound.exe 所在目录，所以配置里也可以写相对路径（如 `.\tool.exe`）。
+- 配置的程序打不开时（路径写错等），程序会退回打开任务管理器，不会静默失效。
 
 ## 截图
 

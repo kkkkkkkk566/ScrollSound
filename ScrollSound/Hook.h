@@ -5,3 +5,8 @@
 void SetMouseHook(DWORD threadId);
 void MoveMouseHook();
 void ReHook();
+
+//双击任务栏空白处：钩子里只负责判定并投递该消息，真正的动作在主消息循环里执行
+#define WM_DBLCLICK_TASKBAR (WM_APP + 1)
+void EnsureSettingFileUnicode();		//wWinMain 一开始调用，保证 setting.ini 是 UTF-16LE
+void RunTaskbarDoubleClickAction();		//在 WndProc 里响应 WM_DBLCLICK_TASKBAR

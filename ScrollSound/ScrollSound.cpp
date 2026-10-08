@@ -1,4 +1,4 @@
-﻿// ScrollSound.cpp : 定义应用程序的入口点。
+// ScrollSound.cpp : 定义应用程序的入口点。
 //editbin /SUBSYSTEM:CONSOLE "$(OUTDIR)\$(ProjectName).exe"
 
 #include "framework.h"
@@ -33,6 +33,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	_In_ LPWSTR    lpCmdLine,
 	_In_ int       nCmdShow)
 {
+	//先把 setting.ini 统一成 UTF-16LE，后面的配置读取才能正确处理中文路径
+	EnsureSettingFileUnicode();
+
 	if (IsSettingAdmin() && !IsAdmin()) {
 		adminrun();
 		return FALSE;
@@ -121,7 +124,7 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
 	hInst = hInstance; // 将实例句柄存储在全局变量中
-	HWND hWnd = CreateWindowEx(WS_EX_TOOLWINDOW ,
+	hWnd = CreateWindowEx(WS_EX_TOOLWINDOW ,
 		szWindowClass, szTitle, WS_POPUP, 0, 0, 0, 0, NULL, NULL, hInstance, nullptr);
 
 
@@ -152,6 +155,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_DESTROY:
 		Shell_NotifyIcon(NIM_DELETE, &nid);
 		PostQuitMessage(0);
+		break;
+	case WM_DBLCLICK_TASKBAR:
+		RunTaskbarDoubleClickAction();
 		break;
 	case WM_USER:
 		if (lParam == WM_RBUTTONDOWN)
