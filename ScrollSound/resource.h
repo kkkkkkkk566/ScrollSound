@@ -16,7 +16,6 @@
 #define ID_Menu                         32783
 #define ID_REHOOK                       32784
 #define ID_PAUSE                        32786
-#define ID_DBLCLICK_TIME_MENU           32788
 #define ID_DBLCLICK_TIME_150            32789
 #define ID_DBLCLICK_TIME_200            32790
 #define ID_DBLCLICK_TIME_250            32791

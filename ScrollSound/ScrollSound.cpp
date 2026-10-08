@@ -151,6 +151,9 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 //
 //  WM_DESTROY  - 发送退出消息并返回
 //
+//托盘菜单刷新函数定义在文件后面（InitTray 之前），这里先声明，供 WndProc 弹出菜单时调用
+static void UpdateDoubleClickTimeMenu();
+
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	switch (message)
@@ -182,36 +185,52 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 
 //托盘菜单里的双击判定时间档位：0 表示跟随系统设置
-struct DoubleClickTimePreset { UINT id; int ms; };
+struct DoubleClickTimePreset { UINT id; int ms; LPCTSTR text; };
 static const DoubleClickTimePreset kDoubleClickTimePresets[] = {
-	{ ID_DBLCLICK_TIME_150,    150 },
-	{ ID_DBLCLICK_TIME_200,    200 },
-	{ ID_DBLCLICK_TIME_250,    250 },
-	{ ID_DBLCLICK_TIME_300,    300 },
-	{ ID_DBLCLICK_TIME_400,    400 },
-	{ ID_DBLCLICK_TIME_500,    500 },
-	{ ID_DBLCLICK_TIME_SYSTEM, 0   },
+	{ ID_DBLCLICK_TIME_150,    150, _T("150 毫秒") },
+	{ ID_DBLCLICK_TIME_200,    200, _T("200 毫秒") },
+	{ ID_DBLCLICK_TIME_250,    250, _T("250 毫秒") },
+	{ ID_DBLCLICK_TIME_300,    300, _T("300 毫秒") },
+	{ ID_DBLCLICK_TIME_400,    400, _T("400 毫秒") },
+	{ ID_DBLCLICK_TIME_500,    500, _T("500 毫秒") },
+	{ ID_DBLCLICK_TIME_SYSTEM, 0,   _T("跟随系统设置") },
 };
 static const int kDoubleClickTimePresetCount = _countof(kDoubleClickTimePresets);
+
+//“双击判定时间”子菜单在“菜单”里的位置（0 起算，紧跟“以管理员权限运行”之后）
+#define DBLCLICK_TIME_MENU_POS 3
+
+//“双击判定时间”子菜单：标题要随配置变化，所以在代码里动态建，不写进资源脚本
+static HMENU hDoubleClickTimeMenu = NULL;
+
+//创建并插入“双击判定时间”子菜单，由 InitTray 调用一次
+static void CreateDoubleClickTimeMenu()
+{
+	hDoubleClickTimeMenu = CreatePopupMenu();
+	if (!hDoubleClickTimeMenu) return;
+
+	for (int i = 0; i < kDoubleClickTimePresetCount; i++) {
+		AppendMenu(hDoubleClickTimeMenu, MF_STRING, kDoubleClickTimePresets[i].id,
+			kDoubleClickTimePresets[i].text);
+	}
+
+	InsertMenu(subMenu, DBLCLICK_TIME_MENU_POS, MF_BYPOSITION | MF_POPUP | MF_STRING,
+		reinterpret_cast<UINT_PTR>(hDoubleClickTimeMenu), _T("双击判定时间(&D)"));
+}
 
 //刷新“双击判定时间”子菜单：标题里带上当前生效值，档位里勾选匹配项。
 //setting.ini 里手写的非档位值不会勾中任何档位，但标题仍能看到实际生效的毫秒数
 static void UpdateDoubleClickTimeMenu()
 {
+	if (!hDoubleClickTimeMenu) return;
+
 	int cfgMs = GetDoubleClickIntervalSetting();
 	int effectiveMs = (cfgMs > 0) ? cfgMs : static_cast<int>(GetDoubleClickTime());
 
 	TCHAR title[64] = { 0 };
 	_stprintf_s(title, _T("双击判定时间(%dms)(&D)"), effectiveMs);
-
-	//子菜单来自资源菜单，这里按 ID 取到句柄再改标题
-	MENUITEMINFO mii = { 0 };
-	mii.cbSize = sizeof(mii);
-	mii.fMask = MIIM_SUBMENU;
-	if (GetMenuItemInfo(subMenu, ID_DBLCLICK_TIME_MENU, FALSE, &mii) && mii.hSubMenu) {
-		ModifyMenu(subMenu, ID_DBLCLICK_TIME_MENU, MF_BYCOMMAND | MF_POPUP | MF_STRING,
-			reinterpret_cast<UINT_PTR>(mii.hSubMenu), title);
-	}
+	ModifyMenu(subMenu, DBLCLICK_TIME_MENU_POS, MF_BYPOSITION | MF_POPUP | MF_STRING,
+		reinterpret_cast<UINT_PTR>(hDoubleClickTimeMenu), title);
 
 	UINT checkId = ID_DBLCLICK_TIME_SYSTEM;
 	bool matched = false;
@@ -223,15 +242,17 @@ static void UpdateDoubleClickTimeMenu()
 		}
 	}
 
+	//勾选要作用在子菜单本身：CheckMenuRadioItem 不会递归到子菜单里去找这些 ID
 	if (matched) {
 		//档位 ID 连续且升序，可以直接按范围勾选
-		CheckMenuRadioItem(subMenu, kDoubleClickTimePresets[0].id,
+		CheckMenuRadioItem(hDoubleClickTimeMenu, kDoubleClickTimePresets[0].id,
 			kDoubleClickTimePresets[kDoubleClickTimePresetCount - 1].id, checkId, MF_BYCOMMAND);
 	}
 	else {
 		//非档位值：全部取消勾选，免得看起来像“跟随系统设置”
 		for (int i = 0; i < kDoubleClickTimePresetCount; i++) {
-			CheckMenuItem(subMenu, kDoubleClickTimePresets[i].id, MF_BYCOMMAND | MF_UNCHECKED);
+			CheckMenuItem(hDoubleClickTimeMenu, kDoubleClickTimePresets[i].id,
+				MF_BYCOMMAND | MF_UNCHECKED);
 		}
 	}
 }
@@ -251,6 +272,8 @@ void InitTray(HINSTANCE hInstance, HWND hWnd)
 	hMenu = LoadMenu(hInst, MAKEINTRESOURCE(IDR_TASK_BAR_MENU));//加载资源生成菜单
 
 	subMenu = GetSubMenu(hMenu, 0);
+
+	CreateDoubleClickTimeMenu();//动态插入“双击判定时间”子菜单
 
 	CMenuIcon::AddIconToMenuItem(subMenu, ID_ABOUT, FALSE, GetMenuIcon(IDI_TRAY_ICON));
 	CMenuIcon::AddIconToMenuItem(subMenu, ID_APP_EXIT, FALSE, GetMenuIcon(IDI_EXIT_ICON));
